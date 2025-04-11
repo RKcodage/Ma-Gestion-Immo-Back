@@ -5,6 +5,7 @@ const connectToDatabase = require("./config/db.js");
 
 // Routes
 const authRoutes = require("./routes/auth.js");
+const userRoutes = require("./routes/user");
 
 const app = express();
 app.use(express.json());
@@ -16,6 +17,7 @@ connectToDatabase();
 
 // Using Routes
 app.use(authRoutes);
+app.use(userRoutes);
 
 // Catch-all
 app.all("*", (req, res) => {
