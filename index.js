@@ -4,7 +4,8 @@ const cors = require("cors");
 const connectToDatabase = require("./config/db.js");
 
 // Routes
-// const userRoutes = require("./routes/user.js");
+const authRoutes = require("./routes/auth.js");
+const userRoutes = require("./routes/user");
 
 const app = express();
 app.use(express.json());
@@ -15,7 +16,8 @@ require("dotenv").config();
 connectToDatabase();
 
 // Using Routes
-// app.use(userRoutes);
+app.use(authRoutes);
+app.use(userRoutes);
 
 // Catch-all
 app.all("*", (req, res) => {

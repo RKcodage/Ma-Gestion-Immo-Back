@@ -12,11 +12,11 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ["Propriétaire", "Locataire"],
-    required: true,
   },
   profile: {
     firstName: String,
     lastName: String,
+    username: String,
     phone: String,
     avatar: String,
   },
