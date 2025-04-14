@@ -1,15 +1,17 @@
 const express = require("express");
 const cors = require("cors");
-
 const connectToDatabase = require("./config/db.js");
 
 // Routes
 const authRoutes = require("./routes/auth.js");
 const userRoutes = require("./routes/user");
+const ownerRoutes = require("./routes/owner");
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// Media uploads
 app.use("/uploads", express.static("uploads"));
 
 require("dotenv").config();
@@ -19,6 +21,7 @@ connectToDatabase();
 // Using Routes
 app.use(authRoutes);
 app.use(userRoutes);
+app.use(ownerRoutes);
 
 // Catch-all
 app.all("*", (req, res) => {
