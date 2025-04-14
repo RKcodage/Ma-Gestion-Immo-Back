@@ -54,4 +54,24 @@ const assignRole = async (req, res) => {
   }
 };
 
-module.exports = { getUserById, assignRole };
+// Upload avatar
+const uploadAvatar = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "Aucun fichier reçu." });
+    }
+
+    const user = req.user;
+    user.profile.avatar = `/uploads/${req.file.filename}`;
+    await user.save();
+
+    res
+      .status(200)
+      .json({ message: "Avatar mis à jour", avatar: user.profile.avatar });
+  } catch (error) {
+    console.error("uploadAvatar error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+module.exports = { getUserById, assignRole, uploadAvatar };
