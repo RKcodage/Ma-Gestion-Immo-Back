@@ -7,11 +7,24 @@ const ownerSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
+  emailPro: {
+    type: String,
+  },
   companyName: {
+    type: String,
+  },
+  companyNumber: {
+    type: String,
+  },
+  companyPhone: {
     type: String,
   },
   billingAddress: {
     type: String,
+  },
+  status: {
+    type: String,
+    enum: ["Professionnel", "Particulier"],
   },
   createdAt: {
     type: Date,
