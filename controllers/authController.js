@@ -21,18 +21,18 @@ const signup = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Verify if user already exists
+    // Verify is user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ error: "Email already used" });
     }
 
-    // Password
+    // Generated hash + salt
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync(password, salt);
     const token = uid2(64);
 
-    // Create user in database
+    // Create new user
     const newUser = new User({
       email: email,
       token: token,
@@ -50,11 +50,15 @@ const signup = async (req, res) => {
 
     await newUser.save();
 
+    // Response
     res.status(201).json({
-      _id: newUser._id,
       token: newUser.token,
-      profile: newUser.profile,
-      role: newUser.role,
+      user: {
+        _id: newUser._id,
+        email: newUser.email,
+        role: newUser.role,
+        profile: newUser.profile,
+      },
     });
   } catch (error) {
     console.error("Signup error:", error.message);
@@ -89,10 +93,13 @@ const login = async (req, res) => {
 
     // If user login is successfull
     res.status(200).json({
-      _id: user._id,
       token: user.token,
-      profile: user.profile,
-      role: user.role,
+      user: {
+        _id: user._id,
+        email: user.email,
+        profile: user.profile,
+        role: user.role,
+      },
     });
   } catch (error) {
     console.error("Login error:", error.message);
