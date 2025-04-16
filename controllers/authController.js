@@ -90,6 +90,7 @@ const login = async (req, res) => {
     // If user login is successfull
     res.status(200).json({
       _id: user._id,
+      email: user.email,
       token: user.token,
       profile: user.profile,
       role: user.role,
