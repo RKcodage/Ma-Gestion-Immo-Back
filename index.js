@@ -6,6 +6,7 @@ const connectToDatabase = require("./config/db.js");
 const authRoutes = require("./routes/auth.js");
 const userRoutes = require("./routes/user");
 const ownerRoutes = require("./routes/owner");
+const tenantRoutes = require("./routes/tenant");
 
 const app = express();
 app.use(express.json());
@@ -22,6 +23,7 @@ connectToDatabase();
 app.use(authRoutes);
 app.use(userRoutes);
 app.use(ownerRoutes);
+app.use(tenantRoutes);
 
 // Catch-all
 app.all("*", (req, res) => {
