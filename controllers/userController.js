@@ -130,6 +130,8 @@ const deleteUserById = async (req, res) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
+    await Owner.deleteOne({ userId });
+    await Tenant.deleteOne({ userId });
     await User.findByIdAndDelete(userId);
 
     res.status(200).json({ message: "User account erased" });
