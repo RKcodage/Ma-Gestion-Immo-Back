@@ -1,5 +1,6 @@
 const Property = require("../models/Property");
 
+// Create property
 const createProperty = async (req, res) => {
   try {
     const {
@@ -46,6 +47,37 @@ const createProperty = async (req, res) => {
   }
 };
 
+// Get property
+const getPropertiesByOwner = async (req, res) => {
+  try {
+    const ownerId = req.params.ownerId;
+
+    const properties = await Property.find({ ownerId }).populate("ownerId");
+
+    res.status(200).json(properties);
+  } catch (error) {
+    console.error("getPropertiesByOwner error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get property by id
+const getPropertyById = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id).populate("ownerId");
+
+    if (!property) {
+      return res.status(404).json({ error: "Property not found" });
+    }
+
+    res.status(200).json(property);
+  } catch (error) {
+    console.error("getPropertyById error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Update property
 const updatePropertyById = async (req, res) => {
   try {
     const propertyId = req.params.id;
@@ -69,4 +101,6 @@ const updatePropertyById = async (req, res) => {
 module.exports = {
   createProperty,
   updatePropertyById,
+  getPropertiesByOwner,
+  getPropertyById,
 };
