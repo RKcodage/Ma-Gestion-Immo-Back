@@ -29,7 +29,7 @@ const getOwnerById = async (req, res) => {
     const owner = await Owner.findById(req.params.id);
 
     if (!owner) {
-      return res.status(404).json({ error: "Owner introuvable" });
+      return res.status(404).json({ error: "Owner not found" });
     }
 
     const propertiesCount = await Property.countDocuments({
@@ -51,7 +51,7 @@ const getOwnerByUserId = async (req, res) => {
 
     const owner = await Owner.findOne({ userId });
     if (!owner) {
-      return res.status(404).json({ error: "Propriétaire non trouvé" });
+      return res.status(404).json({ error: "Owner not found" });
     }
 
     res.status(200).json(owner);

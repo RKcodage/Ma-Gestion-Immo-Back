@@ -10,6 +10,31 @@ const tenantSchema = new mongoose.Schema({
   address: {
     type: String,
   },
+  birthDate: {
+    type: Date,
+  },
+  employmentStatus: {
+    type: String,
+    enum: [
+      "CDI",
+      "CDD",
+      "Indépendant",
+      "Étudiant",
+      "Retraité",
+      "Sans emploi",
+      "Autre",
+    ],
+  },
+  guarantor: {
+    type: Boolean,
+    default: false,
+  },
+  visaleGuarantee: {
+    enabled: { type: Boolean, default: false },
+    contractNumber: { type: String },
+    validityStart: { type: Date },
+    validityEnd: { type: Date },
+  },
   createdAt: {
     type: Date,
     default: Date.now,
