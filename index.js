@@ -8,6 +8,8 @@ const userRoutes = require("./routes/user");
 const ownerRoutes = require("./routes/owner");
 const tenantRoutes = require("./routes/tenant");
 const propertyRoutes = require("./routes/property");
+const unitRoutes = require("./routes/unit");
+const leaseRoutes = require("./routes/lease");
 
 const app = express();
 app.use(express.json());
@@ -26,6 +28,8 @@ app.use(userRoutes);
 app.use(ownerRoutes);
 app.use(tenantRoutes);
 app.use(propertyRoutes);
+app.use(unitRoutes);
+app.use(leaseRoutes);
 
 // Catch-all
 app.all("*", (req, res) => {
