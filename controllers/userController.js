@@ -63,12 +63,10 @@ const uploadAvatar = async (req, res) => {
     }
 
     const user = req.user;
-    user.profile.avatar = `/uploads/${req.file.filename}`;
+    user.profile.avatar = req.file.path; // <- URL Cloudinary
     await user.save();
 
-    res
-      .status(200)
-      .json({ message: "Avatar updated", avatar: user.profile.avatar });
+    res.status(200).json({ message: "Avatar updated", avatar: req.file.path });
   } catch (error) {
     console.error("uploadAvatar error:", error.message);
     res.status(500).json({ error: error.message });
