@@ -34,6 +34,7 @@ const documentSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Unit",
   },
+  isPrivate: { type: Boolean, default: false },
   uploadedAt: {
     type: Date,
     default: Date.now,
