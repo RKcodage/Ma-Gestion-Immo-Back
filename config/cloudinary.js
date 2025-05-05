@@ -25,7 +25,7 @@ const leaseDocStorage = new CloudinaryStorage({
   params: {
     folder: "leases-documents",
     allowed_formats: ["jpg", "jpeg", "png", "pdf"],
-    resource_type: "auto", // important pour permettre pdf/images
+    resource_type: "auto",
   },
 });
 
