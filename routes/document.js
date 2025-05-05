@@ -3,7 +3,11 @@ const router = express.Router();
 const multer = require("multer");
 const isAuthenticated = require("../middlewares/isAuthenticated");
 const { leaseDocStorage } = require("../config/cloudinary");
-const { uploadLeaseDocument } = require("../controllers/documentController");
+const {
+  uploadLeaseDocument,
+  downloadLeaseDocument,
+  getLeaseDocument,
+} = require("../controllers/documentController");
 
 const upload = multer({ storage: leaseDocStorage });
 
@@ -13,5 +17,7 @@ router.post(
   upload.single("file"),
   uploadLeaseDocument
 );
+router.get("/documents", isAuthenticated, getLeaseDocument);
+router.get("/documents/:id/download", isAuthenticated, downloadLeaseDocument);
 
 module.exports = router;
