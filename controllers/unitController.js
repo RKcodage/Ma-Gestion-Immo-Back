@@ -1,4 +1,5 @@
 const Unit = require("../models/Unit");
+const Lease = require("../models/Lease");
 
 // Create a unit for a property
 const createUnit = async (req, res) => {
@@ -44,7 +45,17 @@ const getUnitsByProperty = async (req, res) => {
     const { propertyId } = req.params;
     const units = await Unit.find({ propertyId });
 
-    res.status(200).json(units);
+    const results = await Promise.all(
+      units.map(async (unit) => {
+        const leaseCount = await Lease.countDocuments({ unitId: unit._id });
+        return {
+          ...unit.toObject(),
+          leaseCount,
+        };
+      })
+    );
+
+    res.status(200).json(results);
   } catch (error) {
     console.error("getUnitsByProperty error:", error.message);
     res.status(500).json({ error: error.message });
