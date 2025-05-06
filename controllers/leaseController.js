@@ -1,9 +1,11 @@
 const Lease = require("../models/Lease");
 const User = require("../models/User");
 const Tenant = require("../models/Tenant");
+const Owner = require("../models/Owner");
 const Unit = require("../models/Unit");
 const Property = require("../models/Property");
 
+// Create Lease
 const createLease = async (req, res) => {
   try {
     const {
@@ -108,6 +110,57 @@ const getLeasesByOwner = async (req, res) => {
   }
 };
 
+// Get leases by role
+const getLeasesByRole = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const role = req.user.role;
+
+    let leases = [];
+
+    if (role === "Propriétaire") {
+      const owner = await Owner.findOne({ userId });
+      if (!owner) return res.status(404).json({ message: "Owner not found" });
+
+      leases = await Lease.find({ ownerId: owner._id })
+        .populate({
+          path: "unitId",
+          populate: { path: "propertyId" },
+        })
+        .populate({
+          path: "tenantId",
+          populate: {
+            path: "userId",
+            select: "email profile.firstName profile.lastName",
+          },
+        });
+    } else if (role === "Locataire") {
+      const tenant = await Tenant.findOne({ userId });
+      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+      leases = await Lease.find({ tenantId: tenant._id })
+        .populate({
+          path: "unitId",
+          populate: { path: "propertyId" },
+        })
+        .populate({
+          path: "ownerId",
+          populate: {
+            path: "userId",
+            select: "email profile.firstName profile.lastName",
+          },
+        });
+    } else {
+      return res.status(403).json({ message: "Unauthorized role" });
+    }
+
+    res.status(200).json(leases);
+  } catch (error) {
+    console.error("getLeasesForForm error:", error.message);
+    res.status(500).json({ message: "Server error while fetching leases" });
+  }
+};
+
 // Update lease
 const updateLease = async (req, res) => {
   try {
@@ -150,6 +203,7 @@ const deleteLease = async (req, res) => {
 module.exports = {
   createLease,
   getLeasesByOwner,
+  getLeasesByRole,
   updateLease,
   deleteLease,
 };
