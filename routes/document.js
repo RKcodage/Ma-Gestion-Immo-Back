@@ -7,6 +7,7 @@ const {
   uploadLeaseDocument,
   downloadLeaseDocument,
   getLeaseDocument,
+  deleteLeaseDocument,
 } = require("../controllers/documentController");
 
 const upload = multer({ storage: leaseDocStorage });
@@ -19,5 +20,6 @@ router.post(
 );
 router.get("/documents", isAuthenticated, getLeaseDocument);
 router.get("/documents/:id/download", isAuthenticated, downloadLeaseDocument);
+router.delete("/document/:id", isAuthenticated, deleteLeaseDocument);
 
 module.exports = router;
