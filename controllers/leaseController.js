@@ -4,6 +4,7 @@ const Tenant = require("../models/Tenant");
 const Owner = require("../models/Owner");
 const Unit = require("../models/Unit");
 const Property = require("../models/Property");
+const Notification = require("../models/Notification");
 
 // Create Lease
 const createLease = async (req, res) => {
@@ -30,21 +31,18 @@ const createLease = async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // Find user by his email
     const user = await User.findOne({ email: tenantEmail });
     if (!user) {
       return res.status(404).json({ message: "User not found !" });
     }
 
-    // Find the tenant with his userId
     const tenant = await Tenant.findOne({ userId: user._id });
     if (!tenant) {
       return res.status(404).json({
-        message: "No Tenant profile  linked to a User.",
+        message: "No Tenant profile linked to a User.",
       });
     }
 
-    // Create the lease
     const lease = new Lease({
       unitId,
       ownerId,
@@ -58,6 +56,16 @@ const createLease = async (req, res) => {
     });
 
     await lease.save();
+
+    // Create notification for the tenant
+    await Notification.create({
+      userId: user._id, // tenant by his userId
+      type: "Bail",
+      title: "Nouveau bail disponible",
+      message: "Votre propriétaire a ajouté un nouveau bail pour vous.",
+      data: { leaseId: lease._id },
+      link: `/dashboard/leases?leaseId=${lease._id}`,
+    });
 
     res.status(201).json(lease);
   } catch (error) {
