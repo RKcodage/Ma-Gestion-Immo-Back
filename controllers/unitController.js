@@ -1,5 +1,6 @@
 const Unit = require("../models/Unit");
 const Lease = require("../models/Lease");
+const Document = require("../models/Document");
 
 // Create a unit for a property
 const createUnit = async (req, res) => {
@@ -48,9 +49,14 @@ const getUnitsByProperty = async (req, res) => {
     const results = await Promise.all(
       units.map(async (unit) => {
         const leaseCount = await Lease.countDocuments({ unitId: unit._id });
+        const documentCount = await Document.countDocuments({
+          unitId: unit._id,
+        });
+
         return {
           ...unit.toObject(),
           leaseCount,
+          documentCount,
         };
       })
     );
