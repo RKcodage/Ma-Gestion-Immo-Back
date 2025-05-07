@@ -1,7 +1,9 @@
 const Document = require("../models/Document");
+const User = require("../models/User");
 const Lease = require("../models/Lease");
 const Owner = require("../models/Owner");
 const Tenant = require("../models/Tenant");
+const Notification = require("../models/Notification");
 const axios = require("axios");
 const { cloudinary } = require("../config/cloudinary");
 
@@ -32,6 +34,32 @@ const uploadLeaseDocument = async (req, res) => {
     });
 
     await document.save();
+
+    // Create notification if document created
+    const lease = await Lease.findById(leaseId)
+      .populate("tenantId")
+      .populate("ownerId");
+
+    if (lease) {
+      const uploader = await User.findById(uploaderId);
+      const isOwner = uploader.role === "Propriétaire";
+
+      const recipientUserId = isOwner
+        ? lease.tenantId?.userId
+        : lease.ownerId?.userId;
+
+      if (recipientUserId?.toString() !== uploaderId.toString()) {
+        await Notification.create({
+          userId: recipientUserId,
+          senderId: uploaderId,
+          message: `Un document a été ajouté au bail par ${
+            isOwner ? "votre propriétaire" : "votre locataire"
+          }.`,
+          link: `/dashboard/documents?documentId=${document._id}`,
+        });
+      }
+    }
+
     res.status(201).json({ message: "Document added", document });
   } catch (error) {
     console.error("uploadLeaseDocument error:", error.message);
