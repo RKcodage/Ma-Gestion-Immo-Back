@@ -26,7 +26,8 @@ const createLease = async (req, res) => {
       !tenantEmail ||
       !startDate ||
       !rentAmount ||
-      !chargesAmount
+      !chargesAmount ||
+      !paymentDate
     ) {
       return res.status(400).json({ message: "Missing required fields" });
     }
