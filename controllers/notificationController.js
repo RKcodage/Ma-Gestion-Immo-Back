@@ -46,9 +46,12 @@ const markAsRead = async (req, res) => {
     const { id } = req.params;
     const userId = req.user._id;
 
-    const updated = await Notification.findByIdAndUpdate(
+    const updated = await Notification.findOneAndUpdate(
       { _id: id, userId },
-      { isRead: true },
+      {
+        isRead: true,
+        readAt: new Date(), // necessary to start up TTL
+      },
       { new: true }
     );
 
