@@ -26,7 +26,8 @@ const createLease = async (req, res) => {
       !tenantEmail ||
       !startDate ||
       !rentAmount ||
-      !chargesAmount
+      !chargesAmount ||
+      !paymentDate
     ) {
       return res.status(400).json({ message: "Missing required fields" });
     }
@@ -208,10 +209,91 @@ const deleteLease = async (req, res) => {
   }
 };
 
+// Get upcoming payments by lease
+const getUpcomingPayments = async (req, res) => {
+  try {
+    const today = new Date();
+    const currentDate = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+
+    const leases = await Lease.find({})
+      .populate({
+        path: "unitId",
+        populate: {
+          path: "propertyId",
+          select: "address city postalCode",
+        },
+      })
+      .populate({
+        path: "tenantId",
+        populate: {
+          path: "userId",
+          select: "profile",
+        },
+      });
+
+    const upcoming = leases
+      .map((lease) => {
+        if (
+          !lease.paymentDate ||
+          !lease.startDate ||
+          !lease.endDate ||
+          !lease.unitId?.propertyId
+        ) {
+          return null;
+        }
+
+        const start = new Date(lease.startDate);
+        const end = new Date(lease.endDate);
+
+        // Calculate next date
+        let paymentMonth = currentDate.getMonth();
+        let paymentYear = currentDate.getFullYear();
+
+        let nextPayment = new Date(
+          paymentYear,
+          paymentMonth,
+          lease.paymentDate
+        );
+        if (nextPayment < currentDate) {
+          // if payment date is already passed in time, take the next month
+          nextPayment = new Date(
+            paymentYear,
+            paymentMonth + 1,
+            lease.paymentDate
+          );
+        }
+
+        // if next payment date is out of lease limits, simply ignore
+        if (nextPayment < start || nextPayment > end) return null;
+
+        return {
+          _id: lease._id,
+          nextPaymentDate: nextPayment,
+          propertyAddress: lease.unitId.propertyId.address,
+          unitLabel: lease.unitId.label,
+          tenant: lease.tenantId?.userId?.profile ?? null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.nextPaymentDate - b.nextPaymentDate)
+      .slice(0, 3); // limit to 3 items
+
+    res.status(200).json(upcoming);
+  } catch (err) {
+    console.error("getUpcomingPayments:", err.message);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
 module.exports = {
   createLease,
   getLeasesByOwner,
   getLeasesByRole,
   updateLease,
   deleteLease,
+  getUpcomingPayments,
 };
