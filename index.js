@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const connectToDatabase = require("./config/db.js");
+require("./jobs/PaymentReminders");
 
 // Routes
 const authRoutes = require("./routes/auth.js");
