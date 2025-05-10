@@ -140,6 +140,7 @@ const getLeasesByRole = async (req, res) => {
           path: "tenantId",
           populate: {
             path: "userId",
+            model: "User",
             select: "email profile.firstName profile.lastName",
           },
         });
