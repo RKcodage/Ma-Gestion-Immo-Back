@@ -290,6 +290,84 @@ const getUpcomingPayments = async (req, res) => {
   }
 };
 
+// Get payments historic
+const getPaymentsHistoric = async (req, res) => {
+  try {
+    const today = new Date();
+    const currentDate = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+
+    const leases = await Lease.find({})
+      .populate({
+        path: "unitId",
+        populate: {
+          path: "propertyId",
+          select: "address city postalCode",
+        },
+      })
+      .populate({
+        path: "tenantId",
+        populate: {
+          path: "userId",
+          select: "profile",
+        },
+      });
+
+    const history = leases
+      .map((lease) => {
+        if (
+          !lease.paymentDate ||
+          !lease.startDate ||
+          !lease.endDate ||
+          !lease.unitId?.propertyId
+        ) {
+          return null;
+        }
+
+        const start = new Date(lease.startDate);
+        const end = new Date(lease.endDate);
+
+        let paymentMonth = currentDate.getMonth();
+        let paymentYear = currentDate.getFullYear();
+
+        // Calculate last payment date
+        let lastPayment = new Date(
+          paymentYear,
+          paymentMonth,
+          lease.paymentDate
+        );
+        if (lastPayment >= currentDate) {
+          lastPayment = new Date(
+            paymentYear,
+            paymentMonth - 1,
+            lease.paymentDate
+          );
+        }
+
+        if (lastPayment < start || lastPayment > end) return null;
+
+        return {
+          _id: lease._id,
+          lastPaymentDate: lastPayment,
+          propertyAddress: lease.unitId.propertyId.address,
+          unitLabel: lease.unitId.label,
+          tenant: lease.tenantId?.userId?.profile ?? null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.lastPaymentDate - a.lastPaymentDate)
+      .slice(0, 3);
+
+    res.status(200).json(history);
+  } catch (err) {
+    console.error("getPaymentsHistoric:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 module.exports = {
   createLease,
   getLeasesByOwner,
@@ -297,4 +375,5 @@ module.exports = {
   updateLease,
   deleteLease,
   getUpcomingPayments,
+  getPaymentsHistoric,
 };
