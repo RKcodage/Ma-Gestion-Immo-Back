@@ -133,8 +133,8 @@ const login = async (req, res) => {
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "rkabra.dev@gmail.com",
-    pass: "xmgkdeuvssglvqnj",
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
   },
 });
 
