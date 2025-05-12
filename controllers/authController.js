@@ -141,7 +141,7 @@ const forgotPassword = async (req, res) => {
     await user.save();
 
     // Send e-mail with reset link
-    const resetLink = `http://localhost:5174/reset-password/${resetToken}`;
+    const resetLink = `https://ma-gestion-immo.netlify.app/reset-password/${resetToken}`;
 
     await transporter.sendMail({
       from: "rkabra.dev@gmail.com",
