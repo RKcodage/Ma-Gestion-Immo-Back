@@ -1,4 +1,7 @@
 const User = require("../models/User");
+const Invitation = require("../models/Invitation");
+const Lease = require("../models/Lease");
+const Tenant = require("../models/Tenant");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const uid2 = require("uid2");
@@ -18,41 +21,56 @@ const signup = async (req, res) => {
       role,
     } = req.body;
 
-    // Verify required fields
     if (!email || !password || !firstName || !lastName) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Verify is user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ error: "Email already used" });
     }
 
-    // Generated hash + salt
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync(password, salt);
     const token = uid2(64);
 
-    // Create new user
+    // Verify if invitation is still available
+    const invitation = await Invitation.findOne({
+      email,
+      used: false,
+      expiresAt: { $gt: Date.now() },
+    });
+
+    // Attribute tenant role by invitation
+    const forcedRole = invitation ? "Locataire" : role;
+
     const newUser = new User({
-      email: email,
-      token: token,
-      hash: hash,
-      salt: salt,
-      role: role,
+      email,
+      token,
+      hash,
+      salt,
+      role: forcedRole,
       profile: {
-        firstName: firstName,
-        lastName: lastName,
-        username: username,
-        phone: phone,
-        avatar: avatar,
+        firstName,
+        lastName,
+        username,
+        phone,
+        avatar,
       },
     });
 
     await newUser.save();
 
-    // Response
+    // If invitation : create user Id and link with lease
+    if (invitation && invitation.leaseId) {
+      const tenant = await Tenant.create({ userId: newUser._id });
+      await Lease.findByIdAndUpdate(invitation.leaseId, {
+        tenantId: tenant._id,
+      });
+      invitation.used = true;
+      await invitation.save();
+    }
+
     res.status(201).json({
       token: newUser.token,
       user: {

@@ -14,6 +14,7 @@ const leaseRoutes = require("./routes/lease");
 const documentRoutes = require("./routes/document");
 const notificationRoutes = require("./routes/notification");
 const messageRoutes = require("./routes/message");
+const invitationRoutes = require("./routes/invitation");
 
 const app = express();
 app.use(express.json());
@@ -37,6 +38,7 @@ app.use(leaseRoutes);
 app.use(documentRoutes);
 app.use(notificationRoutes);
 app.use(messageRoutes);
+app.use(invitationRoutes);
 
 // Catch-all
 app.all("*", (req, res) => {
