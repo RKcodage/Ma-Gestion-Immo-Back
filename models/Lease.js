@@ -11,11 +11,13 @@ const leaseSchema = new mongoose.Schema({
     ref: "Owner",
     required: true,
   },
-  tenantId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Tenant",
-    required: true,
-  },
+  tenants: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tenant",
+      required: true,
+    },
+  ],
   startDate: {
     type: Date,
     required: true,

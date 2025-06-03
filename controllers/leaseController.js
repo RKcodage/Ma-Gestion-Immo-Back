@@ -5,6 +5,18 @@ const Owner = require("../models/Owner");
 const Unit = require("../models/Unit");
 const Property = require("../models/Property");
 const Notification = require("../models/Notification");
+const Invitation = require("../models/Invitation");
+const uid2 = require("uid2");
+const nodemailer = require("nodemailer");
+
+// Mail service
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
+  },
+});
 
 // Create Lease
 const createLease = async (req, res) => {
@@ -12,7 +24,7 @@ const createLease = async (req, res) => {
     const {
       unitId,
       ownerId,
-      tenantEmail,
+      tenantEmails,
       startDate,
       endDate,
       rentAmount,
@@ -23,53 +35,93 @@ const createLease = async (req, res) => {
 
     if (
       !unitId ||
-      !tenantEmail ||
+      !tenantEmails ||
+      !Array.isArray(tenantEmails) ||
+      tenantEmails.length === 0 ||
       !startDate ||
       !rentAmount ||
-      !chargesAmount
+      !chargesAmount ||
+      !paymentDate
     ) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const user = await User.findOne({ email: tenantEmail });
-    if (!user) {
-      return res.status(404).json({ message: "User not found !" });
+    const tenantIds = [];
+    const pendingInvitations = [];
+
+    for (const email of tenantEmails) {
+      const user = await User.findOne({ email });
+
+      if (!user) {
+        const invitationToken = uid2(32);
+        pendingInvitations.push({ email, token: invitationToken });
+      } else {
+        const tenant = await Tenant.findOne({ userId: user._id });
+        if (!tenant) continue;
+        tenantIds.push(tenant._id);
+      }
     }
 
-    const tenant = await Tenant.findOne({ userId: user._id });
-    if (!tenant) {
-      return res.status(404).json({
-        message: "No Tenant profile linked to a User.",
-      });
-    }
-
-    const lease = new Lease({
+    // ✅ Créer le bail AVANT les invitations
+    const lease = await Lease.create({
       unitId,
       ownerId,
-      tenantId: tenant._id,
+      tenants: tenantIds,
       startDate,
       endDate,
       rentAmount,
       chargesAmount,
       deposit,
       paymentDate,
+      isShared: tenantEmails.length > 1,
     });
 
-    await lease.save();
+    // ✅ Créer les invitations avec leaseId connu
+    await Promise.all(
+      pendingInvitations.map(async ({ email, token }) => {
+        await Invitation.create({
+          email,
+          leaseId: lease._id,
+          token,
+          expiresAt: Date.now() + 48 * 60 * 60 * 1000,
+        });
 
-    // Create notification for the tenant
-    await Notification.create({
-      userId: user._id, // tenant by his userId
-      type: "Bail",
-      title: "Nouveau bail disponible",
-      message: "Votre propriétaire a ajouté un nouveau bail pour vous.",
-      data: { leaseId: lease._id },
-      link: `/dashboard/leases?leaseId=${lease._id}`,
+        await transporter.sendMail({
+          from: "rkabra.dev@gmail.com",
+          to: email,
+          subject: "Invitation à rejoindre Ma Gestion Immo",
+          html: `<p>Bonjour,</p>
+            <p>Vous avez été invité à rejoindre Ma Gestion Immo. Cliquez sur le lien ci-dessous pour créer votre compte et accéder à votre bail :</p>
+            <a href="https://ma-gestion-immo.netlify.app/invitation/${token}">Créer mon compte</a>
+            <p>Ce lien est valide pendant 48 heures.</p>`,
+        });
+      })
+    );
+
+    // ✅ Notifications pour locataires existants
+    await Promise.all(
+      tenantIds.map(async (tenantId) => {
+        const tenant = await Tenant.findById(tenantId).populate("userId");
+        if (tenant?.userId) {
+          await Notification.create({
+            userId: tenant.userId._id,
+            type: "Bail",
+            title: "Nouveau bail disponible",
+            message: "Votre propriétaire a ajouté un nouveau bail pour vous.",
+            data: { leaseId: lease._id },
+            link: `/dashboard/leases?leaseId=${lease._id}`,
+          });
+        }
+      })
+    );
+
+    res.status(201).json({
+      message: "Lease created successfully",
+      leaseId: lease._id,
+      invitationsSent: pendingInvitations.map((i) => i.email),
     });
-
-    res.status(201).json(lease);
   } catch (error) {
-    console.error("Lease creation error :", error.message);
+    console.error("Lease creation error:", error.message);
     res.status(500).json({ message: "Server error during lease creation" });
   }
 };
@@ -136,9 +188,10 @@ const getLeasesByRole = async (req, res) => {
           populate: { path: "propertyId" },
         })
         .populate({
-          path: "tenantId",
+          path: "tenants",
           populate: {
             path: "userId",
+            model: "User",
             select: "email profile.firstName profile.lastName",
           },
         });
@@ -146,7 +199,7 @@ const getLeasesByRole = async (req, res) => {
       const tenant = await Tenant.findOne({ userId });
       if (!tenant) return res.status(404).json({ message: "Tenant not found" });
 
-      leases = await Lease.find({ tenantId: tenant._id })
+      leases = await Lease.find({ tenants: tenant._id })
         .populate({
           path: "unitId",
           populate: { path: "propertyId" },
@@ -155,6 +208,14 @@ const getLeasesByRole = async (req, res) => {
           path: "ownerId",
           populate: {
             path: "userId",
+            select: "email profile.firstName profile.lastName",
+          },
+        })
+        .populate({
+          path: "tenants",
+          populate: {
+            path: "userId",
+            model: "User",
             select: "email profile.firstName profile.lastName",
           },
         });
@@ -208,10 +269,192 @@ const deleteLease = async (req, res) => {
   }
 };
 
+// Get upcoming payments by lease
+const getUpcomingPayments = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const role = req.user.role;
+
+    const today = new Date();
+    const currentDate = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+
+    let leases = [];
+
+    if (role === "Propriétaire") {
+      const owner = await Owner.findOne({ userId });
+      if (!owner) return res.status(404).json({ message: "Owner not found" });
+
+      leases = await Lease.find({ ownerId: owner._id });
+    } else if (role === "Locataire") {
+      const tenant = await Tenant.findOne({ userId });
+      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+      leases = await Lease.find({ tenants: tenant._id });
+    } else {
+      return res.status(403).json({ message: "Unauthorized role" });
+    }
+
+    leases = await Lease.populate(leases, [
+      {
+        path: "unitId",
+        populate: { path: "propertyId", select: "address city postalCode" },
+      },
+      {
+        path: "tenants",
+        populate: { path: "userId", select: "profile" },
+      },
+    ]);
+
+    const upcoming = leases
+      .map((lease) => {
+        if (
+          !lease.paymentDate ||
+          !lease.startDate ||
+          !lease.endDate ||
+          !lease.unitId?.propertyId
+        )
+          return null;
+
+        const start = new Date(lease.startDate);
+        const end = new Date(lease.endDate);
+
+        let paymentMonth = currentDate.getMonth();
+        let paymentYear = currentDate.getFullYear();
+
+        let nextPayment = new Date(
+          paymentYear,
+          paymentMonth,
+          lease.paymentDate
+        );
+        if (nextPayment < currentDate) {
+          nextPayment = new Date(
+            paymentYear,
+            paymentMonth + 1,
+            lease.paymentDate
+          );
+        }
+
+        if (nextPayment < start || nextPayment > end) return null;
+
+        return {
+          _id: lease._id,
+          nextPaymentDate: nextPayment,
+          propertyAddress: lease.unitId.propertyId.address,
+          unitLabel: lease.unitId.label,
+          tenants: lease.tenants.map((t) => t.userId?.profile).filter(Boolean),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.nextPaymentDate - b.nextPaymentDate)
+      .slice(0, 3);
+
+    res.status(200).json(upcoming);
+  } catch (err) {
+    console.error("getUpcomingPayments:", err.message);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+};
+
+// Get payments historic
+const getPaymentsHistoric = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const role = req.user.role;
+
+    const today = new Date();
+    const currentDate = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+
+    let leases = [];
+
+    if (role === "Propriétaire") {
+      const owner = await Owner.findOne({ userId });
+      if (!owner) return res.status(404).json({ message: "Owner not found" });
+
+      leases = await Lease.find({ ownerId: owner._id });
+    } else if (role === "Locataire") {
+      const tenant = await Tenant.findOne({ userId });
+      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+      leases = await Lease.find({ tenants: tenant._id });
+    } else {
+      return res.status(403).json({ message: "Unauthorized role" });
+    }
+
+    leases = await Lease.populate(leases, [
+      {
+        path: "unitId",
+        populate: { path: "propertyId", select: "address city postalCode" },
+      },
+      {
+        path: "tenants",
+        populate: { path: "userId", select: "profile" },
+      },
+    ]);
+
+    const history = leases
+      .map((lease) => {
+        if (
+          !lease.paymentDate ||
+          !lease.startDate ||
+          !lease.endDate ||
+          !lease.unitId?.propertyId
+        )
+          return null;
+
+        const start = new Date(lease.startDate);
+        const end = new Date(lease.endDate);
+
+        let paymentMonth = currentDate.getMonth();
+        let paymentYear = currentDate.getFullYear();
+
+        let lastPayment = new Date(
+          paymentYear,
+          paymentMonth,
+          lease.paymentDate
+        );
+        if (lastPayment >= currentDate) {
+          lastPayment = new Date(
+            paymentYear,
+            paymentMonth - 1,
+            lease.paymentDate
+          );
+        }
+
+        if (lastPayment < start || lastPayment > end) return null;
+
+        return {
+          _id: lease._id,
+          lastPaymentDate: lastPayment,
+          propertyAddress: lease.unitId.propertyId.address,
+          unitLabel: lease.unitId.label,
+          tenants: lease.tenants.map((t) => t.userId?.profile).filter(Boolean),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.lastPaymentDate - a.lastPaymentDate)
+      .slice(0, 3);
+
+    res.status(200).json(history);
+  } catch (err) {
+    console.error("getPaymentsHistoric:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 module.exports = {
   createLease,
   getLeasesByOwner,
   getLeasesByRole,
   updateLease,
   deleteLease,
+  getUpcomingPayments,
+  getPaymentsHistoric,
 };
