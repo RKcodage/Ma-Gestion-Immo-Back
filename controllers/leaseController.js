@@ -5,6 +5,18 @@ const Owner = require("../models/Owner");
 const Unit = require("../models/Unit");
 const Property = require("../models/Property");
 const Notification = require("../models/Notification");
+const Invitation = require("../models/Invitation");
+const uid2 = require("uid2");
+const nodemailer = require("nodemailer");
+
+// Mail service
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.MAIL_USER,
+    pass: process.env.MAIL_PASS,
+  },
+});
 
 // Create Lease
 const createLease = async (req, res) => {
@@ -33,18 +45,56 @@ const createLease = async (req, res) => {
     }
 
     const user = await User.findOne({ email: tenantEmail });
-    if (!user) {
-      return res.status(404).json({ message: "User not found !" });
-    }
 
-    const tenant = await Tenant.findOne({ userId: user._id });
-    if (!tenant) {
-      return res.status(404).json({
-        message: "No Tenant profile linked to a User.",
+    let lease;
+
+    // Create invitation if user doesn't have an account
+    if (!user) {
+      const invitationToken = uid2(32);
+
+      lease = await Lease.create({
+        unitId,
+        ownerId,
+        startDate,
+        endDate,
+        rentAmount,
+        chargesAmount,
+        deposit,
+        paymentDate,
+      });
+
+      await Invitation.create({
+        email: tenantEmail,
+        leaseId: lease._id,
+        token: invitationToken,
+        expiresAt: Date.now() + 48 * 60 * 60 * 1000, // Invitation expires after 48 hours
+      });
+
+      await transporter.sendMail({
+        from: "rkabra.dev@gmail.com",
+        to: tenantEmail,
+        subject: "Invitation à rejoindre Ma Gestion Immo",
+        html: `<p>Bonjour,</p>
+          <p>Vous avez été invité à rejoindre Ma Gestion Immo. Cliquez sur le lien ci-dessous pour créer votre compte et accéder à votre bail :</p>
+          <a href="https://ma-gestion-immo.netlify.app/invitation/${invitationToken}">Créer mon compte</a>
+          <p>Ce lien est valide pendant 48 heures.</p>`,
+      });
+
+      return res.status(201).json({
+        message: "Invitation envoyée au locataire",
+        leaseId: lease._id,
       });
     }
 
-    const lease = new Lease({
+    // If user already have an account
+    const tenant = await Tenant.findOne({ userId: user._id });
+    if (!tenant) {
+      return res.status(404).json({
+        message: "No Tenant profile linked to this user.",
+      });
+    }
+
+    lease = await Lease.create({
       unitId,
       ownerId,
       tenantId: tenant._id,
@@ -56,11 +106,8 @@ const createLease = async (req, res) => {
       paymentDate,
     });
 
-    await lease.save();
-
-    // Create notification for the tenant
     await Notification.create({
-      userId: user._id, // tenant by his userId
+      userId: user._id,
       type: "Bail",
       title: "Nouveau bail disponible",
       message: "Votre propriétaire a ajouté un nouveau bail pour vous.",
@@ -70,7 +117,7 @@ const createLease = async (req, res) => {
 
     res.status(201).json(lease);
   } catch (error) {
-    console.error("Lease creation error :", error.message);
+    console.error("Lease creation error:", error.message);
     res.status(500).json({ message: "Server error during lease creation" });
   }
 };
