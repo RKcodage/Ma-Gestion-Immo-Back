@@ -14,7 +14,7 @@ const uploadLeaseDocument = async (req, res) => {
       return res.status(400).json({ error: "No file sent." });
     }
 
-    const { name, type, leaseId, unitId } = req.body;
+    const { name, type, leaseId, unitId, tenantId } = req.body;
     const isPrivate = req.body.isPrivate === "true";
 
     if (!name || !type || !leaseId) {
@@ -31,34 +31,45 @@ const uploadLeaseDocument = async (req, res) => {
       url: req.file.path,
       uploaderId,
       isPrivate,
+      ...(tenantId ? { tenantId } : {}),
     });
 
     await document.save();
 
-    // Create notification if document created
+    // Create notification
     const lease = await Lease.findById(leaseId)
-      .populate("tenantId")
-      .populate("ownerId");
+      .populate({
+        path: "tenants",
+        populate: { path: "userId" },
+      })
+      .populate({
+        path: "ownerId",
+        populate: { path: "userId" },
+      });
 
-    if (lease) {
-      const uploader = await User.findById(uploaderId);
-      const isOwner = uploader.role === "Propriétaire";
+    const uploader = await User.findById(uploaderId);
+    const isOwner = uploader.role === "Propriétaire";
 
-      const recipientUserId = isOwner
-        ? lease.tenantId?.userId
-        : lease.ownerId?.userId;
+    const recipients = isOwner
+      ? lease.tenants.map((t) => t.userId) // si proprio → notifie tous les locataires
+      : lease.ownerId?.userId
+      ? [lease.ownerId.userId]
+      : [];
 
-      if (recipientUserId?.toString() !== uploaderId.toString()) {
-        await Notification.create({
-          userId: recipientUserId,
-          senderId: uploaderId,
-          message: `Un document a été ajouté au bail par ${
-            isOwner ? "votre propriétaire" : "votre locataire"
-          }.`,
-          link: `/dashboard/documents?documentId=${document._id}`,
-        });
-      }
-    }
+    await Promise.all(
+      recipients
+        .filter((r) => r && r._id.toString() !== uploaderId.toString())
+        .map((recipientUser) =>
+          Notification.create({
+            userId: recipientUser._id,
+            senderId: uploaderId,
+            message: `Un document a été ajouté au bail par ${
+              isOwner ? "votre propriétaire" : "votre locataire"
+            }.`,
+            link: `/dashboard/documents?documentId=${document._id}`,
+          })
+        )
+    );
 
     res.status(201).json({ message: "Document added", document });
   } catch (error) {
@@ -103,7 +114,7 @@ const getLeaseDocument = async (req, res) => {
         path: "leaseId",
         populate: [
           {
-            path: "tenantId",
+            path: "tenants",
             populate: { path: "userId", select: "profile" },
           },
           {
