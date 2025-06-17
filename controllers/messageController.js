@@ -1,10 +1,10 @@
+const { getIO } = require("../socket");
 const mongoose = require("mongoose");
 const Message = require("../models/Message");
 const User = require("../models/User");
 const Lease = require("../models/Lease");
 const Owner = require("../models/Owner");
 const Tenant = require("../models/Tenant");
-const Notification = require("../models/Notification");
 
 // Send Message
 const sendMessage = async (req, res) => {
@@ -16,12 +16,27 @@ const sendMessage = async (req, res) => {
       return res.status(400).json({ error: "Missing required fields !" });
     }
 
-    const message = await Message.create({
+    // Raw message create in database
+    const rawMessage = await Message.create({
       senderId,
       recipientId,
       content,
       topic: topic || "Autre",
     });
+
+    // Fetch message from db to include sender and recipient infos
+    // (populate is needed because .create don't return a populated document)
+    const message = await Message.findById(rawMessage._id)
+      .populate("senderId", "profile")
+      .populate("recipientId", "profile");
+
+    const io = getIO();
+    const populatedMsg = await Message.findById(message._id)
+      .populate("senderId", "profile")
+      .populate("recipientId", "profile");
+
+    // Socket.io send message to recipient
+    io.to(recipientId.toString()).emit("receiveMessage", populatedMsg);
 
     res.status(201).json(message);
   } catch (err) {
@@ -36,7 +51,7 @@ const getMessages = async (req, res) => {
     const currentUserId = req.user._id;
     const otherUserId = req.params.userId;
 
-    // ✅ Vérification de la validité de l'ObjectId
+    // Verify ObjectId validity
     if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
       return res.status(400).json({ error: "Invalid user ID" });
     }
