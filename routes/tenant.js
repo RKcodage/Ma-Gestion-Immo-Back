@@ -8,7 +8,7 @@ const {
 // Middleware
 const isAuthenticated = require("../middlewares/isAuthenticated");
 
-router.get("tenant/:userId", isAuthenticated, getTenantByUserId);
-router.put("tenant/:userId", isAuthenticated, updateTenantByUserId);
+router.get("/tenant/:userId", isAuthenticated, getTenantByUserId);
+router.put("/tenant/:userId", isAuthenticated, updateTenantByUserId);
 
 module.exports = router;

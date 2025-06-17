@@ -1,8 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const upload = multer({ dest: "uploads/" });
+const { avatarStorage } = require("../config/cloudinary");
+const upload = multer({ storage: avatarStorage });
+
 const isAuthenticated = require("../middlewares/isAuthenticated");
+
 const {
   getUserById,
   assignRole,
@@ -13,6 +16,7 @@ const {
 
 // GET
 router.get("/user/:id", isAuthenticated, getUserById);
+
 // PUT
 router.put("/user/role", isAuthenticated, assignRole);
 router.put(
@@ -22,6 +26,7 @@ router.put(
   uploadAvatar
 );
 router.put("/user/:id", isAuthenticated, updateUserById);
+
 // DELETE
 router.delete("/user/:id", isAuthenticated, deleteUserById);
 

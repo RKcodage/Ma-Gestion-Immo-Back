@@ -10,6 +10,11 @@ const unitSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  type: {
+    type: String,
+    enum: ["Appartement", "Parking", "Boxe", "Local commercial", "Autre"],
+    required: true,
+  },
   floor: {
     type: String,
   },
