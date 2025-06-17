@@ -23,11 +23,38 @@ const uploadLeaseDocument = async (req, res) => {
 
     const uploaderId = req.user._id;
 
+    // Check if user is authorized to upload on a lease
+    const lease = await Lease.findById(leaseId);
+    if (!lease) {
+      return res.status(404).json({ error: "Lease not found." });
+    }
+
+    const uploader = await User.findById(uploaderId);
+    const owner = await Owner.findOne({ userId: uploaderId });
+    const tenant = await Tenant.findOne({ userId: uploaderId });
+
+    const isOwner = owner && lease.ownerId.toString() === owner._id.toString();
+    const isTenant =
+      tenant &&
+      lease.tenants.some((t) => t.toString() === tenant._id.toString());
+
+    if (!isOwner && !isTenant) {
+      return res
+        .status(403)
+        .json({ error: "Unauthorized to upload for this lease." });
+    }
+
+    // Unit is required for owners
+    if (isOwner && !unitId) {
+      return res.status(400).json({ error: "unitId is required for owners." });
+    }
+
+    // Create document
     const document = new Document({
       name,
       type,
       leaseId,
-      unitId,
+      unitId: isOwner ? unitId : undefined, // unit is required for owners
       url: req.file.path,
       uploaderId,
       isPrivate,
@@ -36,22 +63,14 @@ const uploadLeaseDocument = async (req, res) => {
 
     await document.save();
 
-    // Create notification
-    const lease = await Lease.findById(leaseId)
-      .populate({
-        path: "tenants",
-        populate: { path: "userId" },
-      })
-      .populate({
-        path: "ownerId",
-        populate: { path: "userId" },
-      });
-
-    const uploader = await User.findById(uploaderId);
-    const isOwner = uploader.role === "Propriétaire";
+    // Notifications
+    await lease.populate([
+      { path: "tenants", populate: { path: "userId" } },
+      { path: "ownerId", populate: { path: "userId" } },
+    ]);
 
     const recipients = isOwner
-      ? lease.tenants.map((t) => t.userId) // si proprio → notifie tous les locataires
+      ? lease.tenants.map((t) => t.userId) // Notify all the tenants for a lease
       : lease.ownerId?.userId
       ? [lease.ownerId.userId]
       : [];
@@ -97,7 +116,7 @@ const getLeaseDocument = async (req, res) => {
       const tenant = await Tenant.findOne({ userId });
       if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
-      leases = await Lease.find({ tenantId: tenant._id });
+      leases = await Lease.find({ tenants: tenant._id });
     } else {
       return res.status(403).json({ error: "Unauthorized role" });
     }
@@ -134,7 +153,7 @@ const getLeaseDocument = async (req, res) => {
       })
       .sort({ uploadedAt: -1 });
 
-    // 🔁 Filtres manuels après population
+    // Filters on property and unit
     if (propertyId) {
       documents = documents.filter(
         (doc) => doc.leaseId?.unitId?.propertyId?._id?.toString() === propertyId
@@ -184,7 +203,9 @@ const downloadLeaseDocument = async (req, res) => {
       } else if (userRole === "Locataire") {
         const tenant = await Tenant.findOne({ userId });
         if (tenant) {
-          isTenant = lease.tenantId.toString() === tenant._id.toString();
+          isTenant = lease.tenants.some(
+            (t) => t.toString() === tenant._id.toString()
+          );
         }
       }
 
@@ -248,7 +269,7 @@ const deleteLeaseDocument = async (req, res) => {
       if (
         tenant &&
         lease &&
-        lease.tenantId.toString() === tenant._id.toString()
+        lease.tenants.some((t) => t.toString() === tenant._id.toString())
       ) {
         canDelete = true;
       }
