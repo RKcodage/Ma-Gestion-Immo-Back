@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const http = require("http");
 const { initSocket } = require("./socket");
 const connectToDatabase = require("./config/db.js");
@@ -32,6 +33,7 @@ connectToDatabase();
 
 app.use(express.json());
 app.use(cors());
+app.use(helmet());
 
 // Media uploads
 app.use("/uploads", express.static("uploads"));
