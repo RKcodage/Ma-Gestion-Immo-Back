@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const http = require("http");
+const { globalLimiter } = require("./config/rateLimiters.js");
 const { initSocket } = require("./socket");
 const connectToDatabase = require("./config/db.js");
 require("./jobs/PaymentReminders");
@@ -22,6 +23,8 @@ const invitationRoutes = require("./routes/invitation");
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 // Http server creation
 const server = http.createServer(app);
 
@@ -34,6 +37,7 @@ connectToDatabase();
 app.use(express.json());
 app.use(cors());
 app.use(helmet());
+app.use(globalLimiter);
 
 // Media uploads
 app.use("/uploads", express.static("uploads"));
