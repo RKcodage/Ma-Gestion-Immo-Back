@@ -142,7 +142,7 @@ const getLeasesByOwner = async (req, res) => {
         },
       })
       .populate({
-        path: "tenantId",
+        path: "tenants",
         populate: {
           path: "userId",
           model: "User",
