@@ -7,7 +7,7 @@ let io;
 function initSocket(server) {
   io = new Server(server, {
     cors: {
-      origin: "https://ma-gestion-immo.netlify.app/", // Only authorize my website
+      origin: "https://ma-gestion-immo.netlify.app", // Only authorize my website
       methods: ["GET", "POST"],
     },
   });
