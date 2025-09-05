@@ -259,42 +259,43 @@ const deleteLeaseDocument = async (req, res) => {
     const role = req.user.role;
 
     const document = await Document.findById(docId);
-    if (!document) {
-      return res.status(404).json({ error: "Document not found" });
-    }
+    if (!document) return res.status(404).json({ error: "Document not found" });
 
-    // Verify rights with the role
-    let canDelete = false;
-
-    if (role === "Propriétaire") {
-      const owner = await Owner.findOne({ userId });
-      const lease = await Lease.findById(document.leaseId);
-      if (owner && lease && lease.ownerId.toString() === owner._id.toString()) {
-        canDelete = true;
-      }
-    } else if (role === "Locataire") {
-      const tenant = await Tenant.findOne({ userId });
-      const lease = await Lease.findById(document.leaseId);
-      if (
-        tenant &&
-        lease &&
-        lease.tenants.some((t) => t.toString() === tenant._id.toString())
-      ) {
-        canDelete = true;
-      }
-    }
-
-    if (!canDelete) {
+    // Only the doc uploader can delete
+    if (String(document.uploaderId) !== String(userId)) {
       return res.status(403).json({ error: "Access forbidden" });
     }
 
-    // Delete document on Cloudinary
-    const publicId = getCloudinaryPublicId(document.url);
-    if (publicId) {
-      await cloudinary.uploader.destroy(publicId);
+    // And must be concerned by the lease (owner or tenant)
+    const lease = await Lease.findById(document.leaseId);
+    if (!lease) return res.status(404).json({ error: "Lease not found" });
+
+    let isConcerned = false;
+
+    if (role === "Propriétaire") {
+      const owner = await Owner.findOne({ userId }).select("_id");
+      if (owner && String(lease.ownerId) === String(owner._id)) {
+        isConcerned = true;
+      }
+    } else if (role === "Locataire") {
+      const tenant = await Tenant.findOne({ userId }).select("_id");
+      if (
+        tenant &&
+        lease.tenants.some((t) => String(t) === String(tenant._id))
+      ) {
+        isConcerned = true;
+      }
     }
 
-    // Delete in database
+    if (!isConcerned) {
+      return res.status(403).json({ error: "Access forbidden" });
+    }
+
+    // Delete file from Cloudinary
+    const publicId = getCloudinaryPublicId(document.url);
+    if (publicId) await cloudinary.uploader.destroy(publicId);
+
+    // Delete from DB
     await document.deleteOne();
 
     res.status(200).json({ message: "Document successfully deleted" });
