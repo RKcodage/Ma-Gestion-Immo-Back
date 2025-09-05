@@ -69,11 +69,20 @@ const uploadLeaseDocument = async (req, res) => {
       { path: "ownerId", populate: { path: "userId" } },
     ]);
 
-    const recipients = isOwner
-      ? lease.tenants.map((t) => t.userId) // Notify all the tenants for a lease
-      : lease.ownerId?.userId
-      ? [lease.ownerId.userId]
-      : [];
+    // Build recipients according to privacy rules
+    // - If uploader is owner and document is private (owner-only), do NOT notify tenants
+    // - If uploader is owner and document is public, notify all tenants linked to the lease
+    // - If uploader is tenant, always notify the owner
+    let recipients = [];
+    if (isOwner) {
+      if (!isPrivate) {
+        recipients = lease.tenants.map((t) => t.userId).filter(Boolean);
+      }
+    } else {
+      if (lease.ownerId?.userId) {
+        recipients = [lease.ownerId.userId];
+      }
+    }
 
     await Promise.all(
       recipients

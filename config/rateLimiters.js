@@ -7,7 +7,12 @@ const globalLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === "/health" || req.path.startsWith("/uploads/"),
+  skip: (req) =>
+    // skip CORS preflights
+    req.method === "OPTIONS" ||
+    req.path.startsWith("/uploads/") ||
+    // skip connections with Socket.IO
+    req.path.startsWith("/socket.io/"),
 });
 
 // Login limit
