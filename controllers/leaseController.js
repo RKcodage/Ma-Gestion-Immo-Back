@@ -21,9 +21,15 @@ const transporter = nodemailer.createTransport({
 // Create Lease
 const createLease = async (req, res) => {
   try {
+    // Get owner linked to a connected user
+    const owner = await Owner.findOne({ userId: req.user._id }).select("_id");
+    if (!owner) {
+      return res.status(403).json({ message: "Owner not found for this user" });
+    }
+
     const {
       unitId,
-      ownerId,
+      /* ownerId */ // ignore value from client
       tenantEmails,
       startDate,
       endDate,
@@ -51,7 +57,6 @@ const createLease = async (req, res) => {
 
     for (const email of tenantEmails) {
       const user = await User.findOne({ email });
-
       if (!user) {
         const invitationToken = uid2(32);
         pendingInvitations.push({ email, token: invitationToken });
@@ -62,10 +67,10 @@ const createLease = async (req, res) => {
       }
     }
 
-    // ✅ Créer le bail AVANT les invitations
+    // Create lease by imposing ownerId from req.user
     const lease = await Lease.create({
       unitId,
-      ownerId,
+      ownerId: owner._id,
       tenants: tenantIds,
       startDate,
       endDate,
@@ -76,7 +81,7 @@ const createLease = async (req, res) => {
       isShared: tenantEmails.length > 1,
     });
 
-    // ✅ Créer les invitations avec leaseId connu
+    // Create invitations with known leaseId
     await Promise.all(
       pendingInvitations.map(async ({ email, token }) => {
         await Invitation.create({
@@ -98,7 +103,7 @@ const createLease = async (req, res) => {
       })
     );
 
-    // ✅ Notifications pour locataires existants
+    // Notifications for tenants already registered
     await Promise.all(
       tenantIds.map(async (tenantId) => {
         const tenant = await Tenant.findById(tenantId).populate("userId");
@@ -234,8 +239,23 @@ const getLeasesByRole = async (req, res) => {
 const updateLease = async (req, res) => {
   try {
     const { leaseId } = req.params;
-    const updateData = req.body;
 
+    // Owner from connected user
+    const owner = await Owner.findOne({ userId: req.user._id }).select("_id");
+    if (!owner)
+      return res.status(403).json({ message: "Action non autorisée" });
+
+    // Verify if user is lease owner
+    const lease = await Lease.findById(leaseId).select("ownerId");
+    if (!lease) return res.status(404).json({ message: "Lease not found" });
+
+    if (String(lease.ownerId) !== String(owner._id)) {
+      return res
+        .status(403)
+        .json({ message: "You're not the owner of this lease" });
+    }
+
+    const updateData = req.body;
     const updatedLease = await Lease.findByIdAndUpdate(leaseId, updateData, {
       new: true,
       runValidators: true,
@@ -256,6 +276,20 @@ const updateLease = async (req, res) => {
 const deleteLease = async (req, res) => {
   try {
     const { leaseId } = req.params;
+
+    // Owner from connected user
+    const owner = await Owner.findOne({ userId: req.user._id }).select("_id");
+    if (!owner) return res.status(403).json({ message: "Action not allowed" });
+
+    // Verify if user is lease owner
+    const lease = await Lease.findById(leaseId).select("ownerId");
+    if (!lease) return res.status(404).json({ message: "Lease not found" });
+
+    if (String(lease.ownerId) !== String(owner._id)) {
+      return res
+        .status(403)
+        .json({ message: "You're not the owner of this lease" });
+    }
 
     const deletedLease = await Lease.findByIdAndDelete(leaseId);
     if (!deletedLease) {
