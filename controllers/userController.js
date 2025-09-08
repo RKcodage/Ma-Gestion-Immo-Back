@@ -2,8 +2,26 @@ const User = require("../models/User");
 const Owner = require("../models/Owner");
 const Tenant = require("../models/Tenant");
 const bcrypt = require("bcryptjs");
+const { cloudinary } = require("../config/cloudinary");
 
-// GET user by Id
+function extractPublicId(url) {
+  try {
+    const parts = url.split("/");
+    const fileWithExt = parts[parts.length - 1];
+    const publicId = fileWithExt.split(".")[0];
+
+    // Folder named "avatars" on cloudinary
+    const folderIndex = parts.findIndex((part) => part === "avatars");
+    if (folderIndex === -1) return null;
+
+    const folder = parts.slice(folderIndex, parts.length - 1).join("/");
+    return `${folder}/${publicId}`;
+  } catch {
+    return null;
+  }
+}
+
+// Get user by Id
 const getUserById = async (req, res) => {
   try {
     const userId = req.params.id;
@@ -55,7 +73,7 @@ const assignRole = async (req, res) => {
   }
 };
 
-// UPLOAD user avatar
+// Upload user avatar
 const uploadAvatar = async (req, res) => {
   try {
     if (!req.file) {
@@ -73,7 +91,34 @@ const uploadAvatar = async (req, res) => {
   }
 };
 
-// UPDATE user by Id
+// Delete user avatar
+const deleteAvatar = async (req, res) => {
+  try {
+    const user = req.user;
+
+    // Check if avatar exists
+    if (!user.profile.avatar) {
+      return res.status(400).json({ error: "No avatar to delete." });
+    }
+
+    // Delete on cloudinary
+    const publicId = extractPublicId(user.profile.avatar);
+    if (publicId) {
+      await cloudinary.uploader.destroy(publicId);
+    }
+
+    // Reset avatar field in database
+    user.profile.avatar = "";
+    await user.save();
+
+    res.status(200).json({ message: "Avatar deleted." });
+  } catch (error) {
+    console.error("deleteAvatar error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Update user by Id
 const updateUserById = async (req, res) => {
   try {
     const userId = req.params.id;
@@ -118,7 +163,7 @@ const updateUserById = async (req, res) => {
   }
 };
 
-// DELETE user by Id
+// Delete user by Id
 const deleteUserById = async (req, res) => {
   try {
     const userId = req.params.id;
@@ -143,6 +188,7 @@ module.exports = {
   getUserById,
   assignRole,
   uploadAvatar,
+  deleteAvatar,
   updateUserById,
   deleteUserById,
 };
