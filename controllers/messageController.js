@@ -5,43 +5,80 @@ const User = require("../models/User");
 const Lease = require("../models/Lease");
 const Owner = require("../models/Owner");
 const Tenant = require("../models/Tenant");
+const { sendMail } = require("../config/mailer");
+const { queueMessageEmail } = require("../utils/emailQueue");
+
+// In-memory rate limiter (per user and event type)
+const buckets = new Map(); // Map that stores counters per userId and eventKey -> { count, reset }
+
+// Returns true to allow the action, false when the quota is exceeded.
+function consume(userId, key, limit = 20, windowMs = 10_000) {
+  const now = Date.now();
+  const k = `${userId}:${key}`; // Compose a unique key for "this user" + "this action"
+  let b = buckets.get(k); // Read the current bucket (counter) for that key, if any
+
+  if (!b || now > b.reset) {
+    // If no bucket exists, or the time window has expired…
+    b = { count: 0, reset: now + windowMs }; // …start a fresh window: zero count, set new reset time
+    buckets.set(k, b); // Save (or replace) the bucket in the Map
+  }
+
+  if (b.count >= limit) return false; // If we've already hit the max within the current window, deny
+
+  b.count++; // Otherwise consume one "token" (increment the counter)
+  return true; // And allow the action
+}
 
 // Send Message
 const sendMessage = async (req, res) => {
   try {
-    const senderId = req.user._id;
+    const senderId = req.user._id.toString();
     const { recipientId, content, topic } = req.body;
 
-    if (!recipientId || !content) {
+    if (!recipientId || !content?.trim()) {
       return res.status(400).json({ error: "Missing required fields !" });
     }
+    if (!mongoose.Types.ObjectId.isValid(recipientId)) {
+      return res.status(400).json({ error: "Invalid recipientId" });
+    }
 
-    // Raw message create in database
-    const rawMessage = await Message.create({
+    // Rate limit : 20 msg / 10s per user
+    if (!consume(senderId, "http-send-message", 20, 10_000)) {
+      return res.status(429).json({ error: "RATE_LIMITED" });
+    }
+
+    // Persistence
+    const saved = await Message.create({
       senderId,
       recipientId,
-      content,
+      content: content.trim(),
       topic: topic || "Autre",
     });
 
-    // Fetch message from db to include sender and recipient infos
-    // (populate is needed because .create don't return a populated document)
-    const message = await Message.findById(rawMessage._id)
+    const message = await Message.findById(saved._id)
       .populate("senderId", "profile")
       .populate("recipientId", "profile");
 
+    // Push in real time
     const io = getIO();
-    const populatedMsg = await Message.findById(message._id)
-      .populate("senderId", "profile")
-      .populate("recipientId", "profile");
+    io.to(recipientId.toString()).emit("new-message", message); // recipient
+    io.to(senderId).emit("new-message", message);
 
-    // Socket.io send message to recipient
-    io.to(recipientId.toString()).emit("receiveMessage", populatedMsg);
+    // Queue debounced email instead of sending one per message
+    try {
+      const [recipientUser, senderUser] = await Promise.all([
+        User.findById(recipientId).select("email profile"),
+        User.findById(senderId).select("email profile"),
+      ]);
+      queueMessageEmail(recipientUser, senderUser, message);
+    } catch (mailErr) {
+      console.warn("sendMessage: queue email failed:", mailErr.message);
+    }
 
-    res.status(201).json(message);
+    return res.status(201).json(message);
   } catch (err) {
-    console.error("sendMessage:", err.message);
-    res.status(500).json({ error: "Message not sent" });
+    console.error("sendMessage:", err);
+    return res.status(500).json({ error: "Message not sent" });
   }
 };
 
@@ -51,7 +88,6 @@ const getMessages = async (req, res) => {
     const currentUserId = req.user._id;
     const otherUserId = req.params.userId;
 
-    // Verify ObjectId validity
     if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
       return res.status(400).json({ error: "Invalid user ID" });
     }
@@ -101,10 +137,7 @@ const getUserConversations = async (req, res) => {
       Array.from(conversationMap.entries()).map(
         async ([otherId, lastMessage]) => {
           const user = await User.findById(otherId).select("profile");
-          return {
-            user,
-            lastMessage,
-          };
+          return { user, lastMessage };
         }
       )
     );
@@ -126,23 +159,17 @@ const getRecipients = async (req, res) => {
       const owner = await Owner.findOne({ userId });
       if (!owner) return res.status(404).json({ error: "Owner not found" });
 
-      // Find leases linked
       const leases = await Lease.find({ ownerId: owner._id }).populate({
-        path: "tenantId",
-        populate: {
-          path: "userId",
-          select: "profile role",
-        },
+        path: "tenants",
+        populate: { path: "userId", select: "profile role" },
       });
 
-      // Extract only valid tenants
       const tenantUsers = leases
-        .map((lease) => lease.tenantId?.userId)
+        .flatMap((lease) => lease.tenants?.map((t) => t.userId) || [])
         .filter((user) => user && user.role === "Locataire")
         .reduce((acc, user) => {
-          if (!acc.find((u) => u._id.toString() === user._id.toString())) {
+          if (!acc.find((u) => u._id.toString() === user._id.toString()))
             acc.push(user);
-          }
           return acc;
         }, []);
 
@@ -153,20 +180,24 @@ const getRecipients = async (req, res) => {
       const tenant = await Tenant.findOne({ userId });
       if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
-      const lease = await Lease.findOne({ tenantId: tenant._id }).populate({
+      const leases = await Lease.find({ tenants: tenant._id }).populate({
         path: "ownerId",
-        populate: {
-          path: "userId",
-          select: "profile role",
-        },
+        populate: { path: "userId", select: "profile role" },
       });
 
-      const ownerUser = lease?.ownerId?.userId;
-      if (!ownerUser || ownerUser.role !== "Propriétaire") {
+      const owners = leases
+        .map((lease) => lease.ownerId?.userId)
+        .filter((u) => u && u.role === "Propriétaire")
+        .reduce((acc, user) => {
+          if (!acc.find((u) => u._id.toString() === user._id.toString()))
+            acc.push(user);
+          return acc;
+        }, []);
+
+      if (owners.length === 0) {
         return res.status(404).json({ error: "Valid owner not found" });
       }
-
-      return res.status(200).json([ownerUser]);
+      return res.status(200).json(owners);
     }
 
     res.status(400).json({ error: "Invalid role" });
@@ -200,11 +231,7 @@ const markMessagesAsRead = async (req, res) => {
     const otherUserId = req.params.userId;
 
     await Message.updateMany(
-      {
-        senderId: otherUserId,
-        recipientId: currentUserId,
-        isRead: false,
-      },
+      { senderId: otherUserId, recipientId: currentUserId, isRead: false },
       { $set: { isRead: true } }
     );
 

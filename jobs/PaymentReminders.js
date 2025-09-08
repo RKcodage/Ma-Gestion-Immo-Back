@@ -1,8 +1,9 @@
 const cron = require("node-cron");
 const Lease = require("../models/Lease");
 const Notification = require("../models/Notification");
+const { sendMail } = require("../config/mailer");
 
-// Scheduled task at 8 A.M
+// Scheduled task at 8 A.M (server UTC)
 cron.schedule("0 8 * * *", async () => {
   console.log("[CRON] Vérification des paiements à venir...");
 
@@ -25,8 +26,8 @@ cron.schedule("0 8 * * *", async () => {
         populate: { path: "propertyId", select: "address city" },
       })
       .populate({
-        path: "tenantId",
-        populate: { path: "userId", select: "profile" },
+        path: "tenants",
+        populate: { path: "userId", select: "profile email" },
       });
 
     for (const lease of leases) {
@@ -34,11 +35,12 @@ cron.schedule("0 8 * * *", async () => {
         !lease.paymentDate ||
         !lease.startDate ||
         !lease.endDate ||
-        !lease.tenantId ||
-        !lease.tenantId.userId ||
-        !lease.unitId?.propertyId
-      )
+        !lease.unitId?.propertyId ||
+        !Array.isArray(lease.tenants) ||
+        lease.tenants.length === 0
+      ) {
         continue;
+      }
 
       const start = new Date(lease.startDate);
       const end = new Date(lease.endDate);
@@ -59,9 +61,13 @@ cron.schedule("0 8 * * *", async () => {
       }
 
       if (nextPaymentDate.toDateString() === oneWeekLater.toDateString()) {
-        // Create a notification for the tenant
+        // Notify and email each tenant user linked to the lease
+        for (const tenant of lease.tenants) {
+          const tenantUser = tenant?.userId;
+          if (!tenantUser?._id) continue;
+
         await Notification.create({
-          userId: lease.tenantId.userId._id,
+            userId: tenantUser._id,
           message: `⚠️ Le loyer de votre logement situé au ${
             lease.unitId.propertyId.address
           } est dû le ${lease.paymentDate} ${nextPaymentDate.toLocaleString(
@@ -72,9 +78,34 @@ cron.schedule("0 8 * * *", async () => {
         });
 
         console.log(
-          `Notification créée pour le locataire ${lease.tenantId.userId.profile?.firstName}`
+            `Notification créée pour le locataire ${tenantUser.profile?.firstName}`
         );
+
+        // Send email reminder
+        try {
+            const to = tenantUser.email;
+          if (to) {
+            const subject = "Rappel de paiement du loyer";
+            const html = `<p>Bonjour ${
+                tenantUser.profile?.firstName || ""
+            },</p>
+                         <p>Votre loyer pour le logement situé au <strong>${
+                           lease.unitId.propertyId.address
+                           }</strong> est dû le <strong>${lease.paymentDate} ${nextPaymentDate.toLocaleString(
+                "fr-FR",
+                { month: "long" }
+              )}</strong>.</p>
+                         <p><a href=\"https://ma-gestion-immo.netlify.app/dashboard/leases\">Voir mon bail</a></p>`;
+            await sendMail({ from: process.env.MAIL_USER, to, subject, html });
+          }
+        } catch (mailErr) {
+          console.warn(
+            "[CRON] Envoi email rappel loyer échoué:",
+            mailErr.message
+          );
+        }
       }
+    }
     }
   } catch (err) {
     console.error("[CRON] Erreur dans PaymentReminders:", err.message);
