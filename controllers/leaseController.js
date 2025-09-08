@@ -85,7 +85,7 @@ const createLease = async (req, res) => {
         });
 
         await sendMail({
-          from: "rkabra.dev@gmail.com",
+          from: process.env.MAIL_USER,
           to: email,
           subject: "Invitation à rejoindre Ma Gestion Immo",
           html: `<p>Bonjour,</p>
