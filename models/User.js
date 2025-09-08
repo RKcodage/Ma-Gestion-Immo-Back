@@ -6,9 +6,7 @@ const userSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
-  token: String,
   hash: String,
-  salt: String,
   role: {
     type: String,
     enum: ["Propriétaire", "Locataire"],

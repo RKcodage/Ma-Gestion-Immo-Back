@@ -10,6 +10,7 @@ const {
   getUserById,
   assignRole,
   uploadAvatar,
+  deleteAvatar,
   updateUserById,
   deleteUserById,
 } = require("../controllers/userController");
@@ -25,6 +26,8 @@ router.put(
   upload.single("avatar"),
   uploadAvatar
 );
+router.delete("/user/avatar", isAuthenticated, deleteAvatar);
+
 router.put("/user/:id", isAuthenticated, updateUserById);
 
 // DELETE
