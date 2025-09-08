@@ -6,6 +6,8 @@ const Tenant = require("../models/Tenant");
 const Notification = require("../models/Notification");
 const axios = require("axios");
 const { cloudinary } = require("../config/cloudinary");
+const { sendMail } = require("../config/mailer");
+const { queueDocumentEmails } = require("../utils/emailQueue");
 
 // Upload lease document
 const uploadLeaseDocument = async (req, res) => {
@@ -14,7 +16,7 @@ const uploadLeaseDocument = async (req, res) => {
       return res.status(400).json({ error: "No file sent." });
     }
 
-    const { name, type, leaseId, unitId, tenantId } = req.body;
+    const { name, type, leaseId, unitId } = req.body;
     const isPrivate = req.body.isPrivate === "true";
 
     if (!name || !type || !leaseId) {
@@ -58,7 +60,6 @@ const uploadLeaseDocument = async (req, res) => {
       url: req.file.path,
       uploaderId,
       isPrivate,
-      ...(tenantId ? { tenantId } : {}),
     });
 
     await document.save();
@@ -98,6 +99,25 @@ const uploadLeaseDocument = async (req, res) => {
           })
         )
     );
+
+    // Queue debounced email notifications (group multiple docs)
+    try {
+      const uploaderUser = await User.findById(uploaderId).select("email profile");
+      const senderName =
+        uploaderUser?.profile?.firstName ||
+        uploaderUser?.profile?.username ||
+        "Un utilisateur";
+
+      const recipientUsers = recipients
+        .filter((r) => r && r._id.toString() !== uploaderId.toString());
+
+      if (recipientUsers.length > 0) {
+        const by = isOwner ? "votre propriétaire" : "votre locataire";
+        queueDocumentEmails(recipientUsers, { name, type, by: `${senderName} (${by})` });
+      }
+    } catch (mailErr) {
+      console.warn("uploadLeaseDocument: queue email failed:", mailErr.message);
+    }
 
     res.status(201).json({ message: "Document added", document });
   } catch (error) {
