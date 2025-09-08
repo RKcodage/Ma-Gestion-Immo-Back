@@ -5,7 +5,7 @@ const Tenant = require("../models/Tenant");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
+const { sendMail } = require("../config/mailer");
 
 // SIGNUP
 const signup = async (req, res) => {
@@ -62,12 +62,14 @@ const signup = async (req, res) => {
     newUser.token = token;
     await newUser.save();
 
-    // If invitation : create user Id and link with lease
+    // If invitation: create Tenant and push into lease.tenants array
     if (invitation && invitation.leaseId) {
       const tenant = await Tenant.create({ userId: newUser._id });
-      await Lease.findByIdAndUpdate(invitation.leaseId, {
-        tenantId: tenant._id,
-      });
+      await Lease.findByIdAndUpdate(
+        invitation.leaseId,
+        { $addToSet: { tenants: tenant._id } },
+        { new: true }
+      );
       invitation.used = true;
       await invitation.save();
     }
@@ -132,15 +134,6 @@ const login = async (req, res) => {
 
 // Forgot and Reset password
 
-// Nodemailer config
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
-  },
-});
-
 // Forgot
 const forgotPassword = async (req, res) => {
   try {
@@ -164,7 +157,7 @@ const forgotPassword = async (req, res) => {
     // Send e-mail with reset link
     const resetLink = `https://ma-gestion-immo.netlify.app/reset-password/${resetToken}`;
 
-    await transporter.sendMail({
+    await sendMail({
       from: "rkabra.dev@gmail.com",
       to: user.email,
       subject: "Réinitialisation de votre mot de passe",
