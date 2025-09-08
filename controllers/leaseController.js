@@ -7,16 +7,9 @@ const Property = require("../models/Property");
 const Notification = require("../models/Notification");
 const Invitation = require("../models/Invitation");
 const uid2 = require("uid2");
-const nodemailer = require("nodemailer");
+const { sendMail } = require("../config/mailer");
 
-// Mail service
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
-  },
-});
+// Mail service comes from config/mailer
 
 // Create Lease
 const createLease = async (req, res) => {
@@ -91,7 +84,7 @@ const createLease = async (req, res) => {
           expiresAt: Date.now() + 48 * 60 * 60 * 1000,
         });
 
-        await transporter.sendMail({
+        await sendMail({
           from: "rkabra.dev@gmail.com",
           to: email,
           subject: "Invitation à rejoindre Ma Gestion Immo",
@@ -103,19 +96,54 @@ const createLease = async (req, res) => {
       })
     );
 
-    // Notifications for tenants already registered
+    // Notifications + email for tenants already registered
+    // Fetch unit/property once for email context
+    let unitForEmail = null;
+    try {
+      unitForEmail = await Unit.findById(lease.unitId).populate({
+        path: "propertyId",
+        select: "address city postalCode",
+      });
+    } catch (_) {}
+
     await Promise.all(
       tenantIds.map(async (tenantId) => {
         const tenant = await Tenant.findById(tenantId).populate("userId");
-        if (tenant?.userId) {
-          await Notification.create({
-            userId: tenant.userId._id,
-            type: "Bail",
-            title: "Nouveau bail disponible",
-            message: "Votre propriétaire a ajouté un nouveau bail pour vous.",
-            data: { leaseId: lease._id },
-            link: `/dashboard/leases?leaseId=${lease._id}`,
-          });
+        if (!tenant?.userId) return;
+
+        // In-app notification
+        await Notification.create({
+          userId: tenant.userId._id,
+          type: "Bail",
+          title: "Nouveau bail disponible",
+          message: "Votre propriétaire a ajouté un nouveau bail pour vous.",
+          data: { leaseId: lease._id },
+          link: `/dashboard/leases?leaseId=${lease._id}`,
+        });
+
+        // Email notification (best-effort)
+        if (tenant.userId.email) {
+          const address = unitForEmail?.propertyId?.address
+            ? `${unitForEmail.propertyId.address}`
+            : null;
+          const subject = "Nouveau bail disponible";
+          const html = `<p>Bonjour ${
+            tenant.userId.profile?.firstName || ""
+          },</p>
+                       <p>Votre propriétaire a ajouté un nouveau bail${
+                         address ? ` pour le logement situé au <strong>${address}</strong>` : ""
+                       }.</p>
+                       <p><a href=\"https://ma-gestion-immo.netlify.app/dashboard/leases?leaseId=${lease._id}\">Consulter mon bail</a></p>`;
+          try {
+            await sendMail({
+              from: process.env.MAIL_USER,
+              to: tenant.userId.email,
+              subject,
+              html,
+            });
+          } catch (e) {
+            console.warn("createLease: email to tenant failed:", e.message);
+          }
         }
       })
     );
