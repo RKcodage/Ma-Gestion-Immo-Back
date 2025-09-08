@@ -5,6 +5,8 @@ const User = require("../models/User");
 const Lease = require("../models/Lease");
 const Owner = require("../models/Owner");
 const Tenant = require("../models/Tenant");
+const { sendMail } = require("../config/mailer");
+const { queueMessageEmail } = require("../utils/emailQueue");
 
 // In-memory rate limiter (per user and event type)
 const buckets = new Map(); // Map that stores counters per userId and eventKey -> { count, reset }
@@ -61,6 +63,17 @@ const sendMessage = async (req, res) => {
     const io = getIO();
     io.to(recipientId.toString()).emit("new-message", message); // recipient
     io.to(senderId).emit("new-message", message);
+
+    // Queue debounced email instead of sending one per message
+    try {
+      const [recipientUser, senderUser] = await Promise.all([
+        User.findById(recipientId).select("email profile"),
+        User.findById(senderId).select("email profile"),
+      ]);
+      queueMessageEmail(recipientUser, senderUser, message);
+    } catch (mailErr) {
+      console.warn("sendMessage: queue email failed:", mailErr.message);
+    }
 
     return res.status(201).json(message);
   } catch (err) {
@@ -147,12 +160,12 @@ const getRecipients = async (req, res) => {
       if (!owner) return res.status(404).json({ error: "Owner not found" });
 
       const leases = await Lease.find({ ownerId: owner._id }).populate({
-        path: "tenantId",
+        path: "tenants",
         populate: { path: "userId", select: "profile role" },
       });
 
       const tenantUsers = leases
-        .map((lease) => lease.tenantId?.userId)
+        .flatMap((lease) => lease.tenants?.map((t) => t.userId) || [])
         .filter((user) => user && user.role === "Locataire")
         .reduce((acc, user) => {
           if (!acc.find((u) => u._id.toString() === user._id.toString()))
@@ -167,17 +180,24 @@ const getRecipients = async (req, res) => {
       const tenant = await Tenant.findOne({ userId });
       if (!tenant) return res.status(404).json({ error: "Tenant not found" });
 
-      const lease = await Lease.findOne({ tenantId: tenant._id }).populate({
+      const leases = await Lease.find({ tenants: tenant._id }).populate({
         path: "ownerId",
         populate: { path: "userId", select: "profile role" },
       });
 
-      const ownerUser = lease?.ownerId?.userId;
-      if (!ownerUser || ownerUser.role !== "Propriétaire") {
+      const owners = leases
+        .map((lease) => lease.ownerId?.userId)
+        .filter((u) => u && u.role === "Propriétaire")
+        .reduce((acc, user) => {
+          if (!acc.find((u) => u._id.toString() === user._id.toString()))
+            acc.push(user);
+          return acc;
+        }, []);
+
+      if (owners.length === 0) {
         return res.status(404).json({ error: "Valid owner not found" });
       }
-
-      return res.status(200).json([ownerUser]);
+      return res.status(200).json(owners);
     }
 
     res.status(400).json({ error: "Invalid role" });
