@@ -6,6 +6,8 @@ const Tenant = require("../models/Tenant");
 const Notification = require("../models/Notification");
 const axios = require("axios");
 const { cloudinary } = require("../config/cloudinary");
+const { sendMail } = require("../config/mailer");
+const { queueDocumentEmails } = require("../utils/emailQueue");
 
 // Upload lease document
 const uploadLeaseDocument = async (req, res) => {
@@ -14,7 +16,7 @@ const uploadLeaseDocument = async (req, res) => {
       return res.status(400).json({ error: "No file sent." });
     }
 
-    const { name, type, leaseId, unitId, tenantId } = req.body;
+    const { name, type, leaseId, unitId } = req.body;
     const isPrivate = req.body.isPrivate === "true";
 
     if (!name || !type || !leaseId) {
@@ -58,7 +60,6 @@ const uploadLeaseDocument = async (req, res) => {
       url: req.file.path,
       uploaderId,
       isPrivate,
-      ...(tenantId ? { tenantId } : {}),
     });
 
     await document.save();
@@ -69,11 +70,20 @@ const uploadLeaseDocument = async (req, res) => {
       { path: "ownerId", populate: { path: "userId" } },
     ]);
 
-    const recipients = isOwner
-      ? lease.tenants.map((t) => t.userId) // Notify all the tenants for a lease
-      : lease.ownerId?.userId
-      ? [lease.ownerId.userId]
-      : [];
+    // Build recipients according to privacy rules
+    // - If uploader is owner and document is private (owner-only), do NOT notify tenants
+    // - If uploader is owner and document is public, notify all tenants linked to the lease
+    // - If uploader is tenant, always notify the owner
+    let recipients = [];
+    if (isOwner) {
+      if (!isPrivate) {
+        recipients = lease.tenants.map((t) => t.userId).filter(Boolean);
+      }
+    } else {
+      if (lease.ownerId?.userId) {
+        recipients = [lease.ownerId.userId];
+      }
+    }
 
     await Promise.all(
       recipients
@@ -89,6 +99,25 @@ const uploadLeaseDocument = async (req, res) => {
           })
         )
     );
+
+    // Queue debounced email notifications (group multiple docs)
+    try {
+      const uploaderUser = await User.findById(uploaderId).select("email profile");
+      const senderName =
+        uploaderUser?.profile?.firstName ||
+        uploaderUser?.profile?.username ||
+        "Un utilisateur";
+
+      const recipientUsers = recipients
+        .filter((r) => r && r._id.toString() !== uploaderId.toString());
+
+      if (recipientUsers.length > 0) {
+        const by = isOwner ? "votre propriétaire" : "votre locataire";
+        queueDocumentEmails(recipientUsers, { name, type, by: `${senderName} (${by})` });
+      }
+    } catch (mailErr) {
+      console.warn("uploadLeaseDocument: queue email failed:", mailErr.message);
+    }
 
     res.status(201).json({ message: "Document added", document });
   } catch (error) {
@@ -250,42 +279,43 @@ const deleteLeaseDocument = async (req, res) => {
     const role = req.user.role;
 
     const document = await Document.findById(docId);
-    if (!document) {
-      return res.status(404).json({ error: "Document not found" });
-    }
+    if (!document) return res.status(404).json({ error: "Document not found" });
 
-    // Verify rights with the role
-    let canDelete = false;
-
-    if (role === "Propriétaire") {
-      const owner = await Owner.findOne({ userId });
-      const lease = await Lease.findById(document.leaseId);
-      if (owner && lease && lease.ownerId.toString() === owner._id.toString()) {
-        canDelete = true;
-      }
-    } else if (role === "Locataire") {
-      const tenant = await Tenant.findOne({ userId });
-      const lease = await Lease.findById(document.leaseId);
-      if (
-        tenant &&
-        lease &&
-        lease.tenants.some((t) => t.toString() === tenant._id.toString())
-      ) {
-        canDelete = true;
-      }
-    }
-
-    if (!canDelete) {
+    // Only the doc uploader can delete
+    if (String(document.uploaderId) !== String(userId)) {
       return res.status(403).json({ error: "Access forbidden" });
     }
 
-    // Delete document on Cloudinary
-    const publicId = getCloudinaryPublicId(document.url);
-    if (publicId) {
-      await cloudinary.uploader.destroy(publicId);
+    // And must be concerned by the lease (owner or tenant)
+    const lease = await Lease.findById(document.leaseId);
+    if (!lease) return res.status(404).json({ error: "Lease not found" });
+
+    let isConcerned = false;
+
+    if (role === "Propriétaire") {
+      const owner = await Owner.findOne({ userId }).select("_id");
+      if (owner && String(lease.ownerId) === String(owner._id)) {
+        isConcerned = true;
+      }
+    } else if (role === "Locataire") {
+      const tenant = await Tenant.findOne({ userId }).select("_id");
+      if (
+        tenant &&
+        lease.tenants.some((t) => String(t) === String(tenant._id))
+      ) {
+        isConcerned = true;
+      }
     }
 
-    // Delete in database
+    if (!isConcerned) {
+      return res.status(403).json({ error: "Access forbidden" });
+    }
+
+    // Delete file from Cloudinary
+    const publicId = getCloudinaryPublicId(document.url);
+    if (publicId) await cloudinary.uploader.destroy(publicId);
+
+    // Delete from DB
     await document.deleteOne();
 
     res.status(200).json({ message: "Document successfully deleted" });

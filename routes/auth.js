@@ -35,6 +35,8 @@ router.post(
   handleValidation,
   forgotPassword
 );
+
+// Reset password
 router.post(
   "/user/reset-password",
   validateResetPassword,
