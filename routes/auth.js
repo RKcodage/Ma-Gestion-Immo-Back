@@ -7,6 +7,8 @@ const {
   forgotPassword,
   resetPassword,
 } = require("../controllers/authController");
+// Limiters
+const { loginLimiter } = require("../config/rateLimiters");
 // Validations
 const {
   validateSignup,
@@ -16,8 +18,15 @@ const {
 } = require("../middlewares/validations/authValidation");
 const handleValidation = require("../middlewares/handleValidation");
 
+// Auth
 router.post("/user/signup", validateSignup, handleValidation, signup);
-router.post("/user/login", validateLogin, handleValidation, login);
+router.post(
+  "/user/login",
+  loginLimiter,
+  validateLogin,
+  handleValidation,
+  login
+);
 
 // Forget password
 router.post(
@@ -26,6 +35,8 @@ router.post(
   handleValidation,
   forgotPassword
 );
+
+// Reset password
 router.post(
   "/user/reset-password",
   validateResetPassword,
