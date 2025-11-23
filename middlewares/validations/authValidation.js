@@ -18,12 +18,12 @@ const validateSignup = [
   body("profile.lastName").notEmpty().withMessage("Le nom est requis"),
 
   body("profile.username")
-    .optional()
+    .optional({ checkFalsy: true })
     .isLength({ min: 2 })
     .withMessage("Le nom d'utilisateur doit contenir au moins 2 caractères"),
 
   body("profile.phone")
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone("fr-FR")
     .withMessage("Numéro de téléphone invalide"),
 ];
