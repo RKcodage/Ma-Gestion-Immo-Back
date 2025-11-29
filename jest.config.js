@@ -13,7 +13,11 @@ module.exports = {
     "index.js",
     "socket.js",
   ],
-  coveragePathIgnorePatterns: ["/node_modules/", "/tests/"],
+  coveragePathIgnorePatterns: [
+    "/node_modules/",
+    "/tests/",
+    "<rootDir>/tests/utils/test-db-handler.js",
+  ],
   clearMocks: true,
   restoreMocks: true,
   moduleDirectories: ["node_modules", "<rootDir>"],
