@@ -54,14 +54,6 @@ const signup = async (req, res) => {
 
     await newUser.save();
 
-    // Create JWT
-    const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || "1d",
-    });
-
-    newUser.token = token;
-    await newUser.save();
-
     // If invitation: create Tenant and push into lease.tenants array
     if (invitation && invitation.leaseId) {
       const tenant = await Tenant.create({ userId: newUser._id });
@@ -75,7 +67,7 @@ const signup = async (req, res) => {
     }
 
     res.status(201).json({
-      token,
+      message: "User created, please log in",
       user: {
         _id: newUser._id,
         email: newUser.email,
