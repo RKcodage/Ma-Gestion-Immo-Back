@@ -7,12 +7,12 @@ describe("User model", () => {
       email,
       hash: "hashed-password",
       role: "Propriétaire",
-      profile: { firstName: "Ada", lastName: "Lovelace" },
+      profile: { firstName: "John", lastName: "Doe" },
     });
 
     const storedUser = await User.findOne({ email });
     expect(storedUser).not.toBeNull();
-    expect(storedUser.profile.firstName).toBe("Ada");
+    expect(storedUser.profile.firstName).toBe("John");
   });
 
   it("applique la contrainte d'unicité sur l'email", async () => {
