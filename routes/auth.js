@@ -6,6 +6,7 @@ const {
   login,
   forgotPassword,
   resetPassword,
+  googleAuth,
 } = require("../controllers/authController");
 // Limiters
 const { loginLimiter } = require("../config/rateLimiters");
@@ -43,5 +44,8 @@ router.post(
   handleValidation,
   resetPassword
 );
+
+// Google login
+router.post("/user/login/google", loginLimiter, googleAuth);
 
 module.exports = router;

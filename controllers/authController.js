@@ -6,6 +6,30 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { sendMail } = require("../config/mailer");
+const { OAuth2Client } = require("google-auth-library");
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// LINK LEASE TO USER WITH INVITATION
+const processInvitationForUser = async (invitation, userId) => {
+  // If there is no invitation or no leaseId, nothing to do
+  if (!invitation || !invitation.leaseId) {
+    return;
+  }
+
+  // Create a Tenant for this user
+  const tenant = await Tenant.create({ userId });
+
+  // Attach tenant to the lease
+  await Lease.findByIdAndUpdate(
+    invitation.leaseId,
+    { $addToSet: { tenants: tenant._id } },
+    { new: true }
+  );
+
+  // Mark invitation as used
+  invitation.used = true;
+  await invitation.save();
+};
 
 // SIGNUP
 const signup = async (req, res) => {
@@ -124,9 +148,9 @@ const login = async (req, res) => {
   }
 };
 
-// Forgot and Reset password
+// FORGOT AND RESET PASSWORD
 
-// Forgot
+// FORGOT
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -166,7 +190,7 @@ const forgotPassword = async (req, res) => {
   }
 };
 
-// Reset
+// RESET
 const resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
@@ -200,4 +224,103 @@ const resetPassword = async (req, res) => {
   }
 };
 
-module.exports = { signup, login, forgotPassword, resetPassword };
+// GOOGLE AUTH
+const googleAuth = async (req, res) => {
+  try {
+    const { credential, role } = req.body;
+
+    // 1) Check that we received the Google ID token from the frontend
+    if (!credential) {
+      return res.status(400).json({ error: "Missing Google credential" });
+    }
+
+    // 2) Verify the token with Google
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID, // must match your .env name
+      });
+      payload = ticket.getPayload();
+    } catch (error) {
+      console.error("Google token verification failed:", error.message);
+      return res.status(401).json({ error: "Invalid Google token" });
+    }
+
+    // 3) Extract useful information from the Google token
+    const {
+      email,
+      given_name: firstName,
+      family_name: lastName,
+      picture: avatar,
+    } = payload || {};
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ error: "Google account does not include an email" });
+    }
+
+    // 4) Look for an existing user with this email
+    let user = await User.findOne({ email });
+
+    // 5) If user does not exist yet, create it (similar to signup)
+    if (!user) {
+      // Check if there is a valid invitation for this email
+      const invitation = await Invitation.findOne({
+        email,
+        used: false,
+        expiresAt: { $gt: Date.now() },
+      });
+
+      // If invitation exists, force role to 'Locataire'
+      const forcedRole = invitation ? "Locataire" : role || "Locataire";
+
+      user = new User({
+        email,
+        role: forcedRole,
+        profile: {
+          firstName,
+          lastName,
+          avatar,
+        },
+      });
+
+      await user.save();
+
+      // Process invitation: create Tenant + attach to Lease
+      await processInvitationForUser(invitation, user._id);
+    }
+
+    // 6) Optionally update profile (e.g. avatar) if empty
+    user.profile = user.profile || {};
+    if (!user.profile.avatar && avatar) {
+      user.profile.avatar = avatar;
+    }
+
+    // 7) Generate a JWT, same logic as in login()
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
+      expiresIn: process.env.JWT_EXPIRES_IN,
+    });
+
+    // Keep consistency with classic login by storing token on user
+    user.token = token;
+    await user.save();
+
+    // 8) Return the token and user data to the frontend
+    res.status(200).json({
+      token,
+      user: {
+        _id: user._id,
+        email: user.email,
+        profile: user.profile,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("Google auth error:", error.message);
+    res.status(500).json({ error: "Unable to authenticate with Google" });
+  }
+};
+
+module.exports = { signup, login, forgotPassword, resetPassword, googleAuth };
